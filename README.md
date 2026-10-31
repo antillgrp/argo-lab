@@ -195,6 +195,8 @@ Your WSL2 environment uses `networkingMode=mirrored`.
 │   ├── set-wsl-resources.bat         # Batch launcher (bypasses execution policy & unblocks file)
 │   └── set-wsl-resources.ps1         # PowerShell host hardware allocation script
 ├── kind-argo.yaml                    # 3-node kind cluster configuration (mirrored mode compatible)
+├── k8s-code/                         # Official School of DevOps course manifests (instavote, storage, etc.)
+├── kube-ops-view/                    # Cluster visualizer dashboard (deploy on NodePort 32000)
 ├── README.md                         # This training handbook
 ├── demo-app/                         # Sample progressive delivery microservice
 │   ├── 10-app.yaml                   # Rollout spec, stable & preview services, ingress
