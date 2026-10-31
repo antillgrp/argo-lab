@@ -1,0 +1,58 @@
+# =============================================================================
+# gitops/10-application.yaml -- the Argo CD Application
+# =============================================================================
+#
+# Applied IMPERATIVELY with kubectl on purpose. Argo CD Image Updater's default
+# `argocd` write-back method mutates the live Application object. The docs are
+# explicit that this is "pseudo-persistent": if the Application itself is stored
+# in Git and synced over the in-cluster copy, Image Updater's overrides get
+# wiped. So: keep the workload in Git, keep the Application out of Git.
+#
+# ---------------------------------------------------------------------------
+# SET YOUR REPO URL FIRST. Argo CD only speaks git -- it cannot read a local
+# directory off the WSL filesystem, so this folder needs a git remote.
+#
+#   cd /home/toor/DEVOPS_DEV/_Ultimate_Argo_Bootcamp
+#   git init -b main && git add -A && git commit -m "argo lab"
+#   git remote add origin git@github.com:<you>/_Ultimate_Argo_Bootcamp.git
+#   git push -u origin main
+#
+#   # then point this file at it:
+#   sed -i 's#REPLACE_ME_REPO_URL#https://github.com/<you>/_Ultimate_Argo_Bootcamp.git#' \
+#     gitops/10-application.yaml
+#
+# A PUBLIC repo is enough: with the `argocd` write-back method Image Updater
+# needs READ access only. Git write-back is the thing that needs credentials.
+# ---------------------------------------------------------------------------
+#
+# Track a BRANCH, not a tag or SHA. Image Updater's git write-back requires a
+# branch, and a branch is what makes the loop continuous anyway.
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: podinfo
+  namespace: argocd            # Applications live where Argo CD lives
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: REPLACE_ME_REPO_URL
+    targetRevision: main
+    path: demo-app             # contains kustomization.yaml -> auto-detected
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: demo
+  syncPolicy:
+    # Auto-sync is effectively REQUIRED for this lab. The docs state Image
+    # Updater "will work best with automatic syncing enabled" -- it only sets
+    # parameters, Argo CD is what actually applies them.
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # The Rollout CRD is installed by the time you apply this, but this
+      # avoids ordering races on a fresh cluster.
+      - ApplyOutOfSyncOnly=true

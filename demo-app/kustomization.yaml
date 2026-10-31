@@ -1,0 +1,36 @@
+# =============================================================================
+# kustomization.yaml -- makes demo-app a KUSTOMIZE app on purpose
+# =============================================================================
+#
+# This is not incidental. Argo CD Image Updater's default `argocd` write-back
+# method works by setting parameter overrides on the Application resource
+# (spec.source.kustomize.images for a Kustomize app, spec.source.helm.parameters
+# for a Helm app). A plain-YAML "directory" Application gives it nowhere to
+# write, so the update silently does nothing.
+#
+# Argo CD auto-detects Kustomize from the presence of this file -- you do not
+# need to set spec.source.kustomize on the Application.
+#
+# Two independent layers set the tag, and they compose:
+#   1. `images:` below            -- the committed baseline
+#   2. Application's
+#      spec.source.kustomize.images -- what Image Updater injects at runtime
+# Layer 2 wins, so an Image Updater promotion shows up as an Application diff
+# without any commit. That is the whole point of the `argocd` write-back method.
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The Application itself (20-gitops.yaml) is deliberately NOT listed here:
+# ImageUpdater CRs and Applications live in ns/argocd, these workloads live in
+# ns/demo, and keeping them apart avoids a confusing app-of-apps bootstrap.
+resources:
+  - 10-app.yaml
+  - 40-analysis.yaml
+
+images:
+  - name: stefanprodan/podinfo
+    newTag: 6.7.0
+
+# You can also drive this by hand to test a promotion without Image Updater:
+#   kustomize edit set image stefanprodan/podinfo:6.7.1

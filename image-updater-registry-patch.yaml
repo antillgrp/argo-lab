@@ -1,0 +1,49 @@
+# Strategic-merge PATCH for the ConfigMap that install.yaml creates EMPTY.
+#
+#   kubectl -n argocd patch configmap argocd-image-updater-config \
+#     --type merge --patch-file image-updater-registry-patch.yaml
+#
+# WHY A PATCH AND NOT A PLAIN `kubectl apply`:
+#   install.yaml declares `argocd-image-updater-config` with NO `data:` block.
+#   If you `kubectl apply` your own copy of that ConfigMap, re-applying
+#   install.yaml later can fight with it. A merge-patch is purely additive.
+#
+# HOW IT REACHES THE CONTROLLER (verified in install.yaml v1.4.0):
+#   volumes:
+#     - configMap:
+#         name: argocd-image-updater-config
+#         items:
+#           - key: registries.conf        <-- exactly this key
+#             path: registries.conf
+#   volumeMounts:
+#     - mountPath: /app/config            <-- lands at /app/config/registries.conf
+#   So NO deployment patching and NO --registries-conf-path flag is needed.
+#   The mounted file is only read at startup, hence the rollout restart.
+#
+# SCHEMA IS STRICT. registry-scanner/pkg/registry/config.go parses this with
+# yaml.UnmarshalStrict, so an unknown key is a HARD ERROR, not a warning.
+# The ONLY valid keys (verified against the v1.4.0 Go struct) are:
+#   name, api_url, ping, credentials, credsexpire, tagsortmode, prefix,
+#   insecure, ca_file, ca_data, defaultns, limit, default
+# There is NO `plain_http` key -- a lot of blog posts invent one. Don't.
+#
+# `name` and `prefix` are MANDATORY and `prefix` must be unique.
+# `api_url` accepts http:// or https://; `insecure: true` disables TLS
+# verification. k3d's registry (registry:2) serves PLAIN HTTP, so we need both
+# the http:// scheme and insecure.
+
+data:
+  registries.conf: |
+    registries:
+      - name: Argo Lab Local Registry
+        prefix: argo.localhost:5000
+        api_url: http://argo.localhost:5000
+        insecure: true
+
+  # Poll interval. Default is 2m; 60s is friendlier while you are learning and
+  # watching `kubectl get imageupdater -n argocd -w`.
+  interval: "60s"
+
+  # debug logs show the registry calls and why a tag was accepted/rejected --
+  # invaluable when an image silently refuses to update.
+  log.level: "debug"

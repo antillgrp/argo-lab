@@ -1,0 +1,112 @@
+# =============================================================================
+# ALT-imageupdater-v1-crd.yaml -- Image Updater v1.x ImageUpdater CRD
+# =============================================================================
+#
+# *** NOT USED BY THIS LAB AS CONFIGURED ***
+#
+# 00-bootstrap.sh installs Image Updater v0.18.0 because your course (Lab K608)
+# teaches the annotation style. v0.18.0 ships NO CustomResourceDefinition, so
+# applying this file would fail with "no matches for kind ImageUpdater".
+#
+# Keep this as reference for when you move to v1.x (`stable`), where the
+# annotation model is replaced by this CRD. To switch:
+#
+#   kubectl apply -n argocd -f \
+#     https://raw.githubusercontent.com/argoproj-labs/argocd-image-updater/stable/config/install.yaml
+#
+# The bridge if you want v1.x but must keep course annotations: add
+# `useAnnotations: true` to an applicationRef below.
+#
+# This manifest was validated programmatically against the v1.4.0 CRD schema
+# (nesting, required fields, types, enums and regex patterns) -- see README.md.
+# =============================================================================
+#
+# THIS REPLACES THE OLD ANNOTATION STYLE. If a tutorial tells you to put
+#   argocd-image-updater.argoproj.io/image-list: myimg=nginx:1.17.10
+#   argocd-image-updater.argoproj.io/myimg.update-strategy: semver
+# on the Application, it is describing Image Updater v0.x. As of v1.x the
+# configuration lives in this CRD. (An escape hatch still exists: an
+# applicationRef with `useAnnotations: true` honours the legacy annotations.)
+#
+# HARD RULES, all verified against the v1.4.0 source and docs:
+#   1. This CR must be in the SAME namespace as the Applications it references.
+#      Here that is `argocd`. Putting it in `demo` next to the workload is the
+#      single most common mistake and it silently matches nothing.
+#   2. The controller watches ONLY its own namespace by default (Role +
+#      RoleBinding). That is fine because the Application is in argocd too.
+#   3. Image matching is STRICT on the full name including the registry prefix.
+#      `imageName` below must equal what the rendered manifests actually say --
+#      argo.localhost:5000/podinfo -- and that prefix must exist in
+#      registries.conf (see image-updater-registry-patch.yaml) or the registry
+#      cannot be reached at all.
+
+apiVersion: argocd-image-updater.argoproj.io/v1alpha1
+kind: ImageUpdater
+metadata:
+  name: podinfo-updater
+  namespace: argocd
+spec:
+  # Applies to every applicationRef below unless overridden per-image.
+  commonUpdateSettings:
+    # semver picks the highest valid semantic version. Needs real semver tags
+    # (6.7.0, 6.7.1) -- not `latest`, not git SHAs.
+    updateStrategy: "semver"
+    ignoreTags:
+      - "latest"
+      - "master"
+      - "main"
+
+  # `argocd` is the default and needs no further configuration. It writes
+  # spec.source.kustomize.images onto the Application -- which is exactly why
+  # demo-app/kustomization.yaml exists.
+  #
+  # To graduate to the realistic GitOps loop, switch to:
+  #   method: "git:secret:git-creds"
+  #   gitConfig:
+  #     branch: main
+  #     writeBackTarget: "kustomization:/demo-app"
+  # ...where git-creds is a Secret in ns/argocd holding your repo credentials.
+  writeBackConfig:
+    method: "argocd"
+
+  applicationRefs:
+    # Matches Application metadata.name. Use a glob to cover several apps.
+    - namePattern: "podinfo"
+      images:
+        - alias: "podinfo"
+          # name:tag -- the alias is just a handle for logs and overrides.
+          imageName: "stefanprodan/podinfo:6.7.0"
+          commonUpdateSettings:
+            updateStrategy: "semver"
+          # Tells Image Updater WHERE in the manifests the image lives. For a
+          # Kustomize app the name alone is enough; the helm/kustomize targets
+          # are only needed for Helm value paths or unusual layouts.
+          manifestTargets:
+            kustomize:
+              name: "stefanprodan/podinfo"
+
+# -----------------------------------------------------------------------------
+# Watch it work:
+#
+#   kubectl get imageupdater -n argocd
+#     NAME             APPS   IMAGES   LAST CHECKED          READY
+#     podinfo-updater  1      1        2026-10-31T11:20:00Z  True
+#
+#   kubectl get imageupdater podinfo-updater -n argocd -o yaml
+#     # status.recentUpdates lists what changed in the last cycle
+#     # status.conditions carries Ready / Reconciling / Error
+#
+#   kubectl -n argocd logs deploy/argocd-image-updater-controller -f
+#     # log.level=debug is set in image-updater-registry-patch.yaml, so you see
+#     # every registry call and why a tag was accepted or rejected.
+#
+# Then push a newer tag and watch the whole chain fire:
+#   docker pull stefanprodan/podinfo:6.7.1
+#   docker tag  stefanprodan/podinfo:6.7.1 localhost:5000/podinfo:6.7.1
+#   docker push localhost:5000/podinfo:6.7.1
+#     -> Image Updater sees 6.7.1, sets the kustomize image override
+#     -> Argo CD auto-syncs the Application
+#     -> Argo Rollouts starts the canary
+#     -> Traefik shifts 20/40/60/80% of traffic while Prometheus gates it
+#     -> kubectl argo rollouts get rollout podinfo -n demo --watch
+# -----------------------------------------------------------------------------

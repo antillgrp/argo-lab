@@ -1,0 +1,112 @@
+# =============================================================================
+# 40-analysis.yaml -- Argo Rollouts automated analysis against Prometheus
+# =============================================================================
+#
+# This is what turns a canary from "deploy and hope" into progressive delivery:
+# Rollouts runs this PromQL on an interval and promotes or ABORTS based on the
+# result. Without it, `setWeight` steps are just timed pauses. This is Lab K609.
+#
+# THE ADDRESS BELOW IS DELIBERATE AND MUST MATCH YOUR HELM RELEASE NAME.
+# Lab K609 hard-codes:
+#   http://prom-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+# That is "<release>-kube-prometheus-stack-prometheus", so `./00-bootstrap.sh
+# prometheus` installs the chart with release name `prom`. If you pick a
+# different release name, this address stops resolving and every AnalysisRun
+# fails with a connection error.
+#
+# METRICS COME FROM ingress-nginx, so run `./00-bootstrap.sh ingress` first.
+# The metric names below are nginx-ingress ones
+# (nginx_ingress_controller_requests_total,
+#  nginx_ingress_controller_request_duration_seconds_bucket),
+# NOT Traefik's.
+#
+# IMPORTANT -- YOU MUST GENERATE TRAFFIC. With zero requests the rate() calls
+# return no samples, the analysis gets no result, and after failureLimit runs
+# the Rollout aborts. That is correct behaviour, not a bug. Lab K609 does this
+# with a `siege` Job (schoolofdevops/loadtest:v1); locally you can just:
+#
+#   while true; do
+#     curl -s -o /dev/null -w '%{http_code}\n' \
+#       -H 'Host: podinfo.example.com' http://localhost/version
+#     sleep 0.3
+#   done
+
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: demo
+spec:
+  args:
+    - name: ingress-name
+      value: podinfo
+  metrics:
+    - name: success-rate
+      # How often to re-run the query during the canary.
+      interval: 30s
+      # result[0] because the Prometheus provider returns an array of samples.
+      successCondition: result[0] >= 0.95
+      # Tolerate a few inconclusive/failing runs before aborting the Rollout.
+      # Raise this while you are still getting traffic patterns right.
+      failureLimit: 5
+      inconclusiveLimit: 3
+      provider:
+        prometheus:
+          address: http://prom-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(irate(
+              nginx_ingress_controller_requests_total{ingress="{{args.ingress-name}}",status=~"2.."}[1m]
+            ))
+            /
+            sum(irate(
+              nginx_ingress_controller_requests_total{ingress="{{args.ingress-name}}"}[1m]
+            ))
+---
+# p99 latency, following Lab K609's `latency-analysistemplate.yaml` pattern.
+# The lab asserts result < 50.0 ms; keep that shape so you can compare notes.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: latency
+  namespace: demo
+spec:
+  args:
+    - name: ingress-name
+      value: podinfo
+  metrics:
+    - name: nginx-latency-ms
+      initialDelay: 1m
+      interval: 1m
+      count: 4
+      failureLimit: 2
+      successCondition: result[0] < 50.0
+      failureCondition: result[0] >= 50.0
+      provider:
+        prometheus:
+          address: http://prom-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            scalar(
+              1000 * histogram_quantile(0.99,
+                sum(rate(
+                  nginx_ingress_controller_request_duration_seconds_bucket{ingress="{{args.ingress-name}}"}[1m]
+                )) by (le))
+            )
+---
+# Swap this into the Rollout's `analysis.templates[].templateName` when you only
+# want to watch the promotion mechanics and do not want metrics gating it yet.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: always-succeed
+  namespace: demo
+spec:
+  metrics:
+    - name: pass
+      count: 1
+      successCondition: result[0] == 1
+      provider:
+        prometheus:
+          address: http://prom-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+          # `up` for the prometheus job itself -- always 1 once it is running.
+          query: |
+            sum(up{job="prometheus"})

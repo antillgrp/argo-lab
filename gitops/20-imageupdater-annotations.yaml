@@ -1,0 +1,99 @@
+# =============================================================================
+# gitops/20-imageupdater-annotations.yaml -- Image Updater v0.x style (Lab K608)
+# =============================================================================
+#
+# THIS is the file to use with the version 00-bootstrap.sh installs (v0.18.0).
+# Configuration is a MERGE PATCH onto the Argo CD Application, not a CRD.
+# (ALT-imageupdater-v1-crd.yaml in this folder is the v1.x ImageUpdater CRD
+# form -- kept for reference, but it will NOT work against v0.18.0, which ships
+# no CustomResourceDefinition at all.)
+#
+# Apply with:
+#   kubectl patch application --type=merge -n argocd podinfo \
+#     --patch-file gitops/20-imageupdater-annotations.yaml
+#
+# Verify:
+#   kubectl describe application -n argocd podinfo
+#   kubectl logs -f -l "app.kubernetes.io/name=argocd-image-updater" -n argocd
+#
+# ---------------------------------------------------------------------------
+# THE PART THAT SILENTLY BREAKS LAB K608: the git-creds Secret.
+# write-back-method `git:secret:argocd/git-creds` means "use the Secret named
+# git-creds in namespace argocd". If that Secret does not exist, Image Updater
+# finds the new tag, then fails to write it back -- and the failure only shows
+# in the controller logs, never on the Application.
+#
+# Create it FIRST (HTTPS token form):
+#   kubectl -n argocd create secret generic git-creds \
+#     --from-literal=username=<your-git-user> \
+#     --from-literal=password=<your-personal-access-token>
+#
+# Or SSH form:
+#   kubectl -n argocd create secret generic git-creds \
+#     --from-file=sshPrivateKey=$HOME/.ssh/id_ed25519 \
+#     --from-file=known_hosts=<(ssh-keyscan github.com)
+#
+# Git write-back also requires Argo CD >= v2.0 and an Application that tracks a
+# BRANCH (git-branch: main below). Tracking HEAD, a tag or a SHA will not work.
+#
+# If you would rather skip Git entirely while learning, use
+#   argocd-image-updater.argoproj.io/write-back-method: argocd
+# instead -- that writes parameter overrides onto the Application in-cluster and
+# needs no credentials. It is not persistent (recreating the Application loses
+# it), which is fine for a lab.
+# ---------------------------------------------------------------------------
+
+metadata:
+  annotations:
+    # ---- which images to watch -------------------------------------------
+    # Format: <alias>=<registry>/<repo>. The alias is then the prefix for all
+    # the per-image settings below. Image matching is STRICT on the full name
+    # including the registry, so this must equal what the manifests render.
+    argocd-image-updater.argoproj.io/image-list: podinfo=stefanprodan/podinfo
+
+    # ---- per-image settings (prefix = the alias above) -------------------
+    # semver picks the highest valid semantic version -- right for podinfo's
+    # 6.7.0 / 6.7.1 tags. The course uses `latest` because its CI tags images
+    # with 7-char git SHAs, which are not semver.
+    argocd-image-updater.argoproj.io/podinfo.update-strategy: semver
+    argocd-image-updater.argoproj.io/podinfo.allow-tags: regexp:^v?[0-9]+\.[0-9]+\.[0-9]+$
+    argocd-image-updater.argoproj.io/podinfo.ignore-tags: latest, main, master, edge
+    argocd-image-updater.argoproj.io/podinfo.force-update: "true"
+
+    # Required when the write-back target is a kustomization: tells Image
+    # Updater which `images:` entry in kustomization.yaml to rewrite.
+    argocd-image-updater.argoproj.io/podinfo.kustomize.image-name: stefanprodan/podinfo
+
+    # ---- where to write the result ---------------------------------------
+    # Git write-back (what Lab K608 uses). Needs the git-creds Secret above.
+    argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+    argocd-image-updater.argoproj.io/git-branch: main
+    # Path is RELATIVE to the Application's spec.source.path. The course uses
+    # "kustomization:../base" because its Application path is `staging` and the
+    # kustomization it rewrites is the shared `base`. For this lab the
+    # Application path IS the kustomization dir, so no ../ is needed.
+    argocd-image-updater.argoproj.io/write-back-target: "kustomization:."
+
+# =============================================================================
+# COURSE-EXACT VARIANT -- Lab K608 patches the `vote-staging` Application like
+# this. Use it verbatim when you reach that lab (substitute your own repo for
+# xxxxxx/vote):
+#
+#   metadata:
+#     annotations:
+#       argocd-image-updater.argoproj.io/git-branch: main
+#       argocd-image-updater.argoproj.io/image-list: myimage=xxxxxx/vote
+#       argocd-image-updater.argoproj.io/myimage.allow-tags: regexp:^[0-9a-f]{7}$
+#       argocd-image-updater.argoproj.io/myimage.ignore-tags: latest, dev
+#       argocd-image-updater.argoproj.io/myimage.update-strategy: latest
+#       argocd-image-updater.argoproj.io/myimage.kustomize.image-name: schoolofdevops/vote
+#       argocd-image-updater.argoproj.io/myimage.force-update: "true"
+#       argocd-image-updater.argoproj.io/write-back-method: git:secret:argocd/git-creds
+#       argocd-image-updater.argoproj.io/write-back-target: "kustomization:../base"
+#
+#   kubectl patch application --type=merge -n argocd vote-staging \
+#     --patch-file argo_applications_vote-staging_patch.yaml
+#
+# Note `allow-tags: regexp:^[0-9a-f]{7}$` + `update-strategy: latest`: the CI
+# pipeline tags images with short git SHAs, so semver would match nothing.
+# =============================================================================

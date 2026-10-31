@@ -1,0 +1,171 @@
+# =============================================================================
+# 10-app.yaml -- the workload: Argo Rollouts canary on nginx-ingress
+# =============================================================================
+#
+# ALIGNED TO YOUR COURSE. Lab K603 uses the NGINX traffic router:
+#
+#   strategy:
+#     canary:
+#       canaryService: vote-preview
+#       stableService: vote
+#       trafficRouting:
+#         nginx:
+#           stableIngress: vote
+#
+# kind ships NO ingress controller, so run './00-bootstrap.sh ingress' first.
+# (An earlier revision of this lab used k3d + Traefik; that is kept in
+# k3d-argo.yaml as an alternative, but Traefik contradicts Lab K603.)
+#
+# HOW NGINX TRAFFIC ROUTING WORKS (different from Traefik/Istio):
+#   You create ONE Ingress (`podinfo`) pointing at the STABLE service. During a
+#   rollout Argo Rollouts auto-creates a SECOND Ingress named
+#   `<ingress>-<rollout>-canary` (here: podinfo-podinfo-canary) carrying
+#     nginx.ingress.kubernetes.io/canary: "true"
+#     nginx.ingress.kubernetes.io/canary-weight: "20"
+#   and updates that weight as the steps progress. You never write it yourself.
+#   Watch it with:  kubectl describe ing podinfo-podinfo-canary
+#
+# BEFORE APPLYING, seed two versions so Rollouts has something to promote:
+#
+#   for v in 6.7.0 6.7.1; do
+#     docker pull  stefanprodan/podinfo:$v
+#     kind load docker-image stefanprodan/podinfo:$v --name kind
+#   done
+#
+# `kind load` copies the image into the node's containerd, so there is no
+# registry to run -- but the pods must NOT try to pull, hence
+# imagePullPolicy: IfNotPresent below. (The course instead uses Docker Hub
+# images like initcron/vote, which pull normally.)
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+# Rollouts manages the SELECTORS of these two Services; you must create the
+# objects yourself. `stable` holds production traffic, `canary` the new version.
+apiVersion: v1
+kind: Service
+metadata:
+  name: podinfo-stable
+  namespace: demo
+spec:
+  selector:
+    app: podinfo
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9898
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: podinfo-canary
+  namespace: demo
+spec:
+  selector:
+    app: podinfo
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9898
+---
+# NOTE: no TraefikService, VirtualService or TrafficSplit here. With the nginx
+# provider Argo Rollouts needs nothing beyond the stable Ingress -- it generates
+# the canary Ingress itself. That is the appeal of nginx routing: zero extra CRDs.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: podinfo
+  namespace: demo
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: podinfo
+  template:
+    metadata:
+      labels:
+        app: podinfo
+      annotations:
+        # Makes the app itself visible to the Prometheus kubernetes-pods job.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9898"
+        prometheus.io/path: /metrics
+    spec:
+      containers:
+        - name: podinfo
+          image: stefanprodan/podinfo:6.7.0
+          # IfNotPresent is REQUIRED if you used `kind load docker-image`. With
+          # Always the kubelet would try to pull and could bypass or fail on the
+          # image you loaded into the node.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 9898
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9898
+            initialDelaySeconds: 5
+  strategy:
+    canary:
+      canaryService: podinfo-canary
+      stableService: podinfo-stable
+      trafficRouting:
+        nginx:
+          # Name of the Ingress that serves the STABLE service. Argo Rollouts
+          # clones it into `podinfo-podinfo-canary` and drives canary-weight.
+          stableIngress: podinfo
+      # Background analysis runs from step index 2 onward, so the canary is
+      # measured while it is actually taking traffic.
+      analysis:
+        templates:
+          - templateName: success-rate
+        startingStep: 2
+        args:
+          - name: service-name
+            value: podinfo-canary
+      steps:
+        - setWeight: 20
+        - pause:
+            duration: 30s
+        - setWeight: 40
+        - pause:
+            duration: 30s
+        - setWeight: 60
+        - pause:
+            duration: 30s
+        - setWeight: 80
+        - pause:
+            duration: 30s
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: podinfo
+  namespace: demo
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: podinfo.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                # Pointing at the STABLE service is correct and intentional for
+                # the nginx provider: Argo Rollouts creates the canary Ingress
+                # alongside this one and shifts weight between them.
+                name: podinfo-stable
+                port:
+                  number: 80

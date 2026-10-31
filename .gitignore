@@ -1,0 +1,37 @@
+# ==============================================================================
+# Git Ignore - Ultimate Argo Bootcamp
+# ==============================================================================
+
+# Ignore all video media files
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.wmv
+*.flv
+*.webm
+
+# Course Videos Directory (keep documentation and index files)
+RESOURCES/_VIDEOS/*.mp4
+RESOURCES/_VIDEOS/*.mkv
+RESOURCES/_VIDEOS/*.webm
+!RESOURCES/_VIDEOS/VIDEO_INDEX.md
+!RESOURCES/_VIDEOS/durations.txt
+
+# Backup and temporary files
+*.bak
+*.bak_*
+*.tmp
+__tmp_*
+
+# OS / Editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Local cluster logs & kube artifacts
+*.log
+kubeconfig*

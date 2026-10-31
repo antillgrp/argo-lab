@@ -1,0 +1,100 @@
+# k3d cluster definition for the Argo lab (WSL2, mirrored networking mode)
+#
+# Create with:  k3d cluster create --config k3d-argo.yaml
+# Docs:         https://k3d.io/v5.6.0/usage/configfile/
+#
+# IMPORTANT (mirrored networking): WSL2 `networkingMode=mirrored` only projects
+# WILDCARD (0.0.0.0) listeners inside the VM onto the Windows host. Anything
+# bound to 127.0.0.1 stays trapped inside the VM. That is why kubeAPI.hostIP
+# below is 0.0.0.0 -- without it, kubectl on the Windows side times out.
+
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+
+metadata:
+  name: argo
+
+# 1 control-plane + 2 workers. Argo CD / Workflows / Events / Rollouts all fit
+# comfortably; the agents let you demo pod scheduling, taints and HA replicas.
+servers: 1
+agents: 2
+
+# Pin the k3s image so the lab is reproducible. Bump deliberately, not silently.
+#
+# Chosen: v1.37.1-k3s1 (verified present on Docker Hub). This matches the
+# kubectl v1.37.0 already installed here, so there is ZERO client/server
+# version skew. k3s stable channel is v1.36.5+k3s1 and latest is v1.37.1+k3s1.
+#
+# FALLBACKS, in order, if `k3d cluster create` struggles to bring the node up
+# (k3d v5.9.0 ships an older k3s by default, so a very new image is the most
+# likely thing to need adjusting):
+#   1. rancher/k3s:v1.36.5-k3s1   <- k3s "stable" channel
+#   2. delete this `image:` line entirely -> k3d uses its own tested default
+image: rancher/k3s:v1.37.1-k3s1
+
+# --- API server -----------------------------------------------------------
+# Config-file equivalent of `--api-port 0.0.0.0:6550`.
+# k3d writes this address straight into the kubeconfig, and k3s puts 0.0.0.0 in
+# the API cert SAN list -- so no kubeconfig surgery is needed afterwards.
+kubeAPI:
+  hostIP: "0.0.0.0"
+  hostPort: "6550"
+
+# --- Load balancer ports --------------------------------------------------
+# k3s ships ServiceLB (klipper-lb), so a Service of type LoadBalancer gets a
+# real external IP with no MetalLB install. These map the LB container's 80/443
+# onto the WSL host on 0.0.0.0 -> reachable from a Windows browser.
+#   Argo CD UI      -> Ingress host argocd.local   -> http://localhost:8080
+#   Argo Events     -> webhook/sensor endpoints    -> http://localhost:8080
+ports:
+  - port: 8080:80
+    nodeFilters:
+      - loadbalancer
+  - port: 8443:443
+    nodeFilters:
+      - loadbalancer
+  # NodePort escape hatch, handy when an Ingress is not wired up yet.
+  - port: 30080:30080
+    nodeFilters:
+      - server:0
+
+# --- Local image registry -------------------------------------------------
+# The single biggest quality-of-life win over kind for an Argo lab:
+# build -> push to localhost:5000 -> Argo CD/Workflows deploy it. No Docker Hub,
+# no rate limits, no imagePullSecrets, and k3d injects the host alias so the
+# nodes resolve argo.localhost automatically.
+registries:
+  create:
+    name: argo.localhost
+    host: "0.0.0.0"
+    hostPort: "5000"
+
+# --- Lab repo bind mount --------------------------------------------------
+# Exposes this repo on every server node at /lab, so an Argo CD Application can
+# use a local `directory` source and you can iterate without a Git remote.
+# Reachable from pods via a hostPath volume mounting /lab.
+volumes:
+  - volume: /home/toor/DEVOPS_DEV/_Ultimate_Argo_Bootcamp:/lab:rw
+    nodeFilters:
+      - server:0
+      - agent:*
+
+options:
+  k3d:
+    wait: true          # block until the cluster is actually usable
+    timeout: "180s"
+    disableLoadbalancer: false   # keep ServiceLB -- we want real LB IPs
+    disableImageVolume: false    # keep `k3d image import` working
+    disableRollback: false
+  k3s:
+    # Traefik is left ENABLED on purpose: it is the Ingress controller that
+    # fronts the Argo CD UI and the Argo Events webhooks.
+    extraArgs:
+      # Needed if you later reach the API by a name other than localhost/0.0.0.0
+      - arg: "--tls-san=argo.local"
+        nodeFilters:
+          - server:*
+  kubeconfig:
+    updateDefaultKubeconfig: true   # merge into ~/.kube/config
+    switchCurrentContext: false     # DO NOT auto-switch: your current-context
+                                    # is a real AWS EKS cluster. Switch by hand.

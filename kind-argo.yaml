@@ -1,0 +1,152 @@
+# =============================================================================
+# kind-argo.yaml -- 3-node kind cluster, aligned to your course
+# =============================================================================
+#
+# WHY KIND AND NOT k3d (this reverses the earlier k3d recommendation):
+#
+# Your RESOURCES/ folder shows you are following the School of DevOps
+# "Kubernetes Tutorial with CKA/CKAD Prep" Argo track (course version
+# v2024.06.04.01). That course is written end-to-end for KIND, and the labs
+# hard-code kind assumptions that k3d actively contradicts:
+#
+#   * Lab K101 creates THIS cluster shape:
+#       git clone https://github.com/initcron/k8s-code.git
+#       cd k8s-code/helper/kind/
+#       kind create cluster --config kind-three-node-cluster.yaml
+#     -> kind-control-plane + kind-worker + kind-worker2
+#
+#   * Lab K603 (Canary) uses the NGINX traffic router:
+#       trafficRouting:
+#         nginx:
+#           stableIngress: vote
+#     and expects a `vote-vote-canary` Ingress carrying
+#     `nginx.ingress.kubernetes.io/canary-weight`. k3s ships TRAEFIK instead, so
+#     this spec would not work on k3d without installing nginx-ingress yourself
+#     and disabling Traefik.
+#
+#   * Lab K609 (Experiments & Analysis) queries kube-prometheus-stack at the
+#     hard-coded address
+#       http://prom-kube-prometheus-stack-prometheus.monitoring.svc.cluster.local:9090
+#     and uses `nginx_ingress_controller_request_duration_seconds_bucket`.
+#     Both the chart release name and the nginx metric are kind/nginx specific.
+#
+#   * Lab K609's load test uses `hostAliases` pointing at a WORKER NODE's
+#     internal IP (e.g. 172.18.0.4) to resolve vote.example.com -- a
+#     kind-network-internal pattern.
+#
+# Following the course material beats k3d's faster startup. The WSL2 findings
+# below still apply to kind, and they are the part that will actually break.
+#
+# -----------------------------------------------------------------------------
+# WHAT I CHANGED vs the course's kind-three-node-cluster.yaml
+# -----------------------------------------------------------------------------
+# The upstream course config sets `listenAddress: "0.0.0.0"` on every
+# extraPortMapping (good, mirrored-safe) but sets NOTHING for the API server,
+# so kind defaults apiServerAddress to 127.0.0.1.
+#
+# Your .wslconfig uses networkingMode=mirrored. In mirrored mode a socket bound
+# to 127.0.0.1 inside WSL is NOT reachable from Windows. That breaks every
+# Windows-side client: your browser hitting the Argo CD UI, Windows kubectl,
+# and anything in Docker Desktop's own namespace.
+#
+# Fix: publish the API server on 0.0.0.0 too. Everything else is the course
+# config verbatim so the lab instructions keep working.
+#
+# Also added: 443 on the worker, to complement the course's existing 80 mapping
+# (needed once you reach the TLS Ingress steps).
+#
+# systemd is DISABLED in your WSL2 -- that is fine here. kind needs no systemd;
+# it was only a blocker for MicroK8s and native k3s.
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+
+networking:
+  # THE critical WSL2 mirrored-mode fix. Without this, Windows-side clients
+  # cannot reach the cluster API server.
+  apiServerAddress: "0.0.0.0"
+  # Leave the port to kind's default (random free port) so it cannot collide
+  # with anything else already listening under mirrored networking.
+  ipFamily: ipv4
+
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      # NodePort range used across the course labs.
+      - containerPort: 32000
+        hostPort: 32000
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 32100
+        hostPort: 32100
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30000
+        hostPort: 30000
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30055
+        hostPort: 30055
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30056
+        hostPort: 30056
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30100
+        hostPort: 30100
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30200
+        hostPort: 30200
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30300
+        hostPort: 30300
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30400
+        hostPort: 30400
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30500
+        hostPort: 30500
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30600
+        hostPort: 30600
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30700
+        hostPort: 30700
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 30800
+        hostPort: 30800
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+
+  - role: worker
+    extraPortMappings:
+      # nginx-ingress reaches the host through these (Lab K603/K609).
+      - containerPort: 80
+        hostPort: 80
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      # ADDED: TLS counterpart to the course's port 80 mapping.
+      - containerPort: 443
+        hostPort: 443
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      - containerPort: 8000
+        hostPort: 8000
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+      # NOTE the course's deliberate asymmetry: container 8080 -> host 8001.
+      # Argo Events' webhook sensor and the Argo Workflows UI land here.
+      - containerPort: 8080
+        hostPort: 8001
+        listenAddress: "0.0.0.0"
+        protocol: tcp
+
+  - role: worker
