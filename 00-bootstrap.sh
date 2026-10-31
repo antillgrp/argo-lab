@@ -327,15 +327,12 @@ EOF
 }
 
 # --------------------------------------------------------------------------
-# nginx-ingress -- required by Lab K603's `trafficRouting.nginx.stableIngress`
+# Ingress Selection: NGINX, HAProxy, or MetalLB
+# Note: NGINX is recommended because Lab K603 uses `trafficRouting.nginx.stableIngress`
+# and Lab K609 queries Prometheus for nginx metrics.
 # --------------------------------------------------------------------------
-ingress() {
-  have kubectl || die "kubectl not found."
-  local ctx; ctx="$(kubectl config current-context 2>/dev/null || true)"
-  [[ "$ctx" == "$LAB_CONTEXT" ]] || \
-    die "Refusing to install into context '${ctx}'. Run: kubectl config use-context ${LAB_CONTEXT}"
-
-  log "Installing ingress-nginx..."
+install_nginx_ingress() {
+  log "Installing ingress-nginx (kind provider)..."
   kubectl apply -f \
     https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 
@@ -344,9 +341,6 @@ ingress() {
     pod -l app.kubernetes.io/component=controller --timeout=420s
 
   log "Validating the admission webhook is serving..."
-  # The kind provider manifest ships a ValidatingWebhookConfiguration. If the
-  # controller is not ready, every subsequent Ingress apply fails with
-  # "connection refused" -- the single most common kind ingress failure.
   kubectl -n ingress-nginx get validatingwebhookconfiguration 2>/dev/null || true
 
   log "ingress-nginx ready."
@@ -370,6 +364,124 @@ ingress() {
   C:\Windows\System32\drivers\etc\hosts:
       127.0.0.1 vote.example.com argocd.local
 EOF
+}
+
+install_haproxy_ingress() {
+  have helm || die "helm not found. Helm is required to install HAProxy Ingress."
+  log "Adding haproxy-ingress Helm repository..."
+  helm repo add haproxy-ingress https://haproxy-ingress.github.io/charts >/dev/null
+  helm repo update >/dev/null
+
+  kubectl create namespace haproxy-ingress --dry-run=client -o yaml | kubectl apply -f -
+
+  log "Installing haproxy-ingress via Helm..."
+  # Map ports to host via kind nodePorts or DaemonSet hostPort
+  helm upgrade --install haproxy-ingress haproxy-ingress/haproxy-ingress \
+    --namespace haproxy-ingress \
+    --set controller.kind=DaemonSet \
+    --set controller.daemonset.useHostPort=true \
+    --wait --timeout 10m
+
+  log "HAProxy Ingress ready."
+  cat <<'EOF'
+
+  HAProxy Ingress is installed and listening on host ports 80/443.
+  NOTE: Lab K603 specifically configures `trafficRouting.nginx`. To use HAProxy with
+  Argo Rollouts canary routing, use Gateway API or an alternative traffic routing plugin.
+EOF
+}
+
+install_metallb() {
+  log "Installing MetalLB (Bare-metal LoadBalancer for KIND)..."
+  kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+
+  log "Waiting for MetalLB controller and speaker pods..."
+  kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=controller --timeout=300s
+  kubectl -n metallb-system wait --for=condition=Ready pod -l app=metallb,component=speaker --timeout=300s
+
+  log "Configuring MetalLB IPAddressPool from Docker KIND network..."
+  # Derive an IP pool subnet from docker network inspect kind
+  local subnet
+  subnet="$(docker network inspect -f '{{(index .IPAM.Config 0).Subnet}}' kind 2>/dev/null || true)"
+  if [[ -z "$subnet" ]]; then
+    subnet="172.18.0.0/16"
+  fi
+  # Pick IP range .255.200 to .255.250 in the first 2 octets
+  local prefix
+  prefix="$(echo "$subnet" | cut -d'.' -f1-2)"
+  local start_ip="${prefix}.255.200"
+  local end_ip="${prefix}.255.250"
+
+  log "Applying MetalLB IPAddressPool (${start_ip} - ${end_ip})..."
+  cat <<EOF | kubectl apply -f -
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: kind-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - ${start_ip}-${end_ip}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: kind-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - kind-pool
+EOF
+
+  log "MetalLB ready. Services of type: LoadBalancer will receive external IPs from ${start_ip}-${end_ip}."
+  cat <<'EOF'
+
+  MetalLB provides Layer-2 LoadBalancer IPs for services inside KIND.
+  NOTE: MetalLB is an L4 LoadBalancer provider, not an L7 HTTP Ingress controller.
+  For course Lab K603 and K609, NGINX Ingress controller is recommended.
+EOF
+}
+
+ingress() {
+  have kubectl || die "kubectl not found."
+  local ctx; ctx="$(kubectl config current-context 2>/dev/null || true)"
+  [[ "$ctx" == "$LAB_CONTEXT" ]] || \
+    die "Refusing to install into context '${ctx}'. Run: kubectl config use-context ${LAB_CONTEXT}"
+
+  local choice="${INGRESS_PROVIDER:-${1:-}}"
+
+  if [[ -z "$choice" ]]; then
+    if [[ -t 0 ]]; then
+      echo ""
+      echo "Select Ingress / LoadBalancer provider for KIND:"
+      echo "  1) NGINX Ingress   [Default - Strictly required for course Labs K603 & K609]"
+      echo "  2) HAProxy Ingress [L7 HTTP Ingress via HAProxy]"
+      echo "  3) MetalLB         [L2 LoadBalancer IP pool for KIND]"
+      read -r -p "Enter choice [1-3] (default 1): " sel
+      case "$sel" in
+        2|haproxy) choice="haproxy" ;;
+        3|metallb) choice="metallb" ;;
+        *) choice="nginx" ;;
+      esac
+    else
+      choice="nginx"
+    fi
+  fi
+
+  case "$choice" in
+    nginx)
+      install_nginx_ingress
+      ;;
+    haproxy)
+      install_haproxy_ingress
+      ;;
+    metallb)
+      install_metallb
+      ;;
+    *)
+      die "Invalid ingress option '${choice}'. Must be one of: nginx, haproxy, metallb."
+      ;;
+  esac
 }
 
 # --------------------------------------------------------------------------
@@ -514,12 +626,12 @@ case "${1:-preflight}" in
   tools)        preflight; tools ;;
   cluster)      preflight; tools; cluster ;;
   argo)         argo ;;
-  ingress)      ingress ;;
+  ingress)      shift; ingress "$@" ;;
   imageupdater) imageupdater ;;
   prometheus)   prometheus ;;
   # Ordering matters: ingress before prometheus (nginx ServiceMonitor + metrics),
   # and imageupdater after argo (it patches Argo CD Applications).
   all)          preflight; tools; cluster; argo; ingress; prometheus; imageupdater ;;
   down)         down ;;
-  *) die "Usage: $0 {preflight|tools|cluster|argo|ingress|prometheus|imageupdater|all|down}" ;;
+  *) die "Usage: $0 {preflight|tools|cluster|argo|ingress [nginx|haproxy|metallb]|prometheus|imageupdater|all|down}" ;;
 esac

@@ -136,12 +136,19 @@ If you prefer to run each step individually as you progress through course chapt
 * **When to run:** Before Section 4 (Rollouts) or Section 6 (Argo CD).
 * **What it does:** Deploys CRDs and controller pods for Argo CD (`ns/argocd`), Argo Rollouts (`ns/argo-rollouts`), Argo Workflows (`ns/argo`), and Argo Events (`ns/argo-events`).
 
-### 4. Install NGINX Ingress Controller
+### 4. Install Ingress / LoadBalancer Provider (NGINX, HAProxy, or MetalLB)
 ```bash
-./00-bootstrap.sh ingress
+./00-bootstrap.sh ingress           # Interactive selection prompt
+# Or specify directly:
+./00-bootstrap.sh ingress nginx     # Recommended for course Labs K603 & K609
+./00-bootstrap.sh ingress haproxy   # HAProxy Ingress controller (L7)
+./00-bootstrap.sh ingress metallb   # MetalLB L2 LoadBalancer IP pool for KIND
 ```
 * **When to run:** Before Section 5 (Canary Releases, Lab K603).
-* **What it does:** Installs `ingress-nginx` preconfigured for KIND and admission webhooks, enabling weighted traffic shifting (`canary-weight: 20` ... `80`).
+* **Options:**
+  * **`nginx` (Default & Recommended):** Installs `ingress-nginx` preconfigured for KIND and admission webhooks, enabling weighted traffic shifting (`canary-weight: 20` ... `80`). **Strictly required for Lab K603** (`trafficRouting.nginx.stableIngress: vote`) and Prometheus ingress metrics in Lab K609.
+  * **`haproxy`:** Installs `haproxy-ingress` via Helm as a DaemonSet using hostPorts.
+  * **`metallb`:** Installs MetalLB and automatically configures an `IPAddressPool` based on your Docker KIND subnet, giving services of `type: LoadBalancer` real local IPs.
 
 ### 5. Install Prometheus & Grafana Monitoring
 ```bash
