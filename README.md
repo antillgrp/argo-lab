@@ -122,12 +122,24 @@ If you prefer to run each step individually as you progress through course chapt
 * **When to run:** Before starting Section 3.
 * **What it does:** Downloads and installs official binaries for `kind`, `argocd`, `argo`, `argo-events`, `argo-rollouts`, the `kubectl-argo-rollouts` plugin, and **`k9s`** (Kubernetes terminal UI) into `~/.local/bin/`.
 
-### 2. Provision 3-Node KIND Cluster
+### 2. Provision Kubernetes Cluster (KIND, Docker Desktop, Minikube, K3d, MicroK8s, k0s)
 ```bash
-./00-bootstrap.sh cluster
+./00-bootstrap.sh cluster                 # Interactive selection prompt
+# Or specify directly:
+./00-bootstrap.sh cluster kind            # Default: 3-node KIND cluster (Lab K101)
+./00-bootstrap.sh cluster docker-desktop  # Docker Desktop Kubernetes on Windows Host
+./00-bootstrap.sh cluster minikube        # Multi-node Minikube (Docker driver)
+./00-bootstrap.sh cluster k3d             # 3-node K3s in Docker (Traefik disabled)
+./00-bootstrap.sh cluster microk8s        # Canonical MicroK8s
+./00-bootstrap.sh cluster k0s             # Mirantis k0s in Docker
 ```
 * **When to run:** Section 3 (Environment Setup, Lab K101).
-* **What it does:** Uses `kind-argo.yaml` to spin up 3 containerized nodes (`kind-control-plane`, `kind-worker`, `kind-worker2`), sets up host port mappings (`80`, `443`, NodePorts `30000–30800`, `32000`), binds API server to `0.0.0.0`, and points `kubectl` to `kind-kind`.
+* **Options:**
+  * **`kind` (Default & Recommended):** Spins up a 3-node cluster matching course Lab K101 (`kind-control-plane`, `kind-worker`, `kind-worker2`) using [`kind-argo.yaml`](file:///home/toor/DEVOPS_DEV/_Ultimate_Argo_Bootcamp/kind-argo.yaml).
+  * **`docker-desktop`:** Uses the built-in Kubernetes cluster in Docker Desktop on your Windows host (`context: docker-desktop`).
+  * **`minikube`:** Multi-node cluster with ports `80`, `443`, and NodePorts mapped.
+  * **`k3d` / `k3s`:** Lightweight multi-node cluster in Docker with Traefik disabled so it never conflicts with Ingress NGINX.
+  * **`microk8s` / `k0s`:** Standalone zero-friction options.
 
 ### 3. Install Core Argo Stack
 ```bash

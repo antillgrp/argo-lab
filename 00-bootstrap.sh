@@ -224,9 +224,11 @@ tools() {
 }
 
 # --------------------------------------------------------------------------
-# Cluster
+# Cluster Providers: KIND, Docker Desktop K8s, Minikube, K3d/K3s, MicroK8s, k0s
 # --------------------------------------------------------------------------
-cluster() {
+CLUSTER_PROVIDER="${CLUSTER_PROVIDER:-kind}"
+
+cluster_kind() {
   have kind || die "kind not found -- run './00-bootstrap.sh tools' first."
   [[ -f "$CLUSTER_CONFIG" ]] || die "Missing ${CLUSTER_CONFIG}"
 
@@ -235,36 +237,160 @@ cluster() {
     kind get clusters
   else
     log "Creating cluster from ${CLUSTER_CONFIG} ..."
-    # --wait blocks until the API server is actually serving, so the kubectl
-    # calls below cannot race the bootstrap.
     kind create cluster --name "${CLUSTER_NAME}" --config "$CLUSTER_CONFIG" --wait 5m
   fi
-
-  log "Verifying..."
+  LAB_CONTEXT="kind-${CLUSTER_NAME}"
   kubectl config use-context "$LAB_CONTEXT"
+}
+
+cluster_docker_desktop() {
+  log "Using Docker Desktop Kubernetes on Windows Host..."
+  local dd_ctx="docker-desktop"
+  if ! kubectl config get-contexts "$dd_ctx" >/dev/null 2>&1; then
+    warn "Context '${dd_ctx}' not found in kubeconfig."
+    warn "Ensure 'Enable Kubernetes' is checked in Docker Desktop on Windows and cluster status shows running."
+    die "Cannot find ${dd_ctx} context."
+  fi
+  LAB_CONTEXT="$dd_ctx"
+  kubectl config use-context "$LAB_CONTEXT"
+  log "Switched to Docker Desktop Kubernetes context."
+}
+
+cluster_minikube() {
+  if ! have minikube; then
+    log "Installing minikube CLI into ${BIN_DIR}..."
+    mkdir -p "$BIN_DIR"
+    curl -fsSL -o "${BIN_DIR}/minikube" https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+    chmod +x "${BIN_DIR}/minikube"
+  fi
+  log "Starting Minikube (using docker driver)..."
+  minikube start --driver=docker --profile=argo-lab --nodes=3 --cpus=2 --memory=4096 \
+    --ports=80:80,443:443,30100:30100,30300:30300,32000:32000
+  LAB_CONTEXT="argo-lab"
+  kubectl config use-context "$LAB_CONTEXT"
+}
+
+cluster_k3d() {
+  if ! have k3d; then
+    log "Installing k3d CLI into ${BIN_DIR}..."
+    mkdir -p "$BIN_DIR"
+    curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | USE_SUDO=false K3D_INSTALL_DIR="$BIN_DIR" bash
+  fi
+  if k3d cluster list 2>/dev/null | grep -qw "argo-lab"; then
+    log "k3d cluster 'argo-lab' already exists."
+  else
+    log "Creating 3-node k3d cluster (1 server, 2 agents) with ports mapped..."
+    # Disable traefik so it doesn't conflict with ingress-nginx or course labs
+    k3d cluster create argo-lab \
+      --agents 2 \
+      -p "80:80@loadbalancer" \
+      -p "443:443@loadbalancer" \
+      -p "30100:30100@agent:0" \
+      -p "30300:30300@agent:0" \
+      -p "32000:32000@agent:0" \
+      --k3s-arg "--disable=traefik@server:0"
+  fi
+  LAB_CONTEXT="k3d-argo-lab"
+  kubectl config use-context "$LAB_CONTEXT"
+}
+
+cluster_microk8s() {
+  if ! have microk8s; then
+    warn "MicroK8s runs natively via snap or systemd."
+    warn "If MicroK8s is running on the host or inside a VM/multipass, configure its kubeconfig:"
+    warn "  microk8s config > ~/.kube/config-microk8s"
+    warn "  export KUBECONFIG=~/.kube/config-microk8s"
+    die "microk8s CLI not found. Please install microk8s or select KIND/Docker Desktop."
+  fi
+  log "Enabling MicroK8s addons..."
+  microk8s status --wait-ready
+  microk8s enable dns ingress
+  LAB_CONTEXT="microk8s"
+  microk8s config > "${HOME}/.kube/config-microk8s"
+  kubectl config use-context microk8s 2>/dev/null || true
+}
+
+cluster_k0s() {
+  if ! have k0s; then
+    log "Installing k0s / k0sctl..."
+    mkdir -p "$BIN_DIR"
+    curl -fsSL https://get.k0s.sh | BINDIR="$BIN_DIR" sh || true
+  fi
+  if have docker; then
+    log "Running k0s in Docker container..."
+    docker run -d --name k0s-argo-lab --privileged -v /var/lib/k0s:/var/lib/k0s -p 6443:6443 -p 80:80 -p 443:443 docker.io/k0sproject/k0s:latest || true
+    sleep 10
+    docker exec -t k0s-argo-lab k0s kubeconfig create admin > "${HOME}/.kube/config-k0s"
+    export KUBECONFIG="${HOME}/.kube/config-k0s"
+    LAB_CONTEXT="k0s"
+  else
+    die "k0s standalone requires root/systemd or docker."
+  fi
+}
+
+cluster() {
+  local choice="${CLUSTER_PROVIDER:-${1:-}}"
+
+  if [[ -z "$choice" || "$choice" == "cluster" ]]; then
+    if [[ -t 0 ]]; then
+      echo ""
+      echo "Select Kubernetes Cluster Provider:"
+      echo "  1) KIND (Kubernetes in Docker) [Default - Matches School of DevOps course]"
+      echo "  2) Docker Desktop Kubernetes   [Running on Windows Host]"
+      echo "  3) Minikube                    [Multi-node docker driver]"
+      echo "  4) K3s / K3d                   [Lightweight K3s in Docker, Traefik disabled]"
+      echo "  5) MicroK8s                    [Canonical MicroK8s]"
+      echo "  6) k0s                         [Mirantis zero-friction K8s]"
+      read -r -p "Enter choice [1-6] (default 1): " c_sel
+      case "$c_sel" in
+        2|docker-desktop) choice="docker-desktop" ;;
+        3|minikube)       choice="minikube" ;;
+        4|k3d|k3s)        choice="k3d" ;;
+        5|microk8s)       choice="microk8s" ;;
+        6|k0s)            choice="k0s" ;;
+        *)                choice="kind" ;;
+      esac
+    else
+      choice="kind"
+    fi
+  fi
+
+  case "$choice" in
+    kind)
+      cluster_kind
+      ;;
+    docker-desktop)
+      cluster_docker_desktop
+      ;;
+    minikube)
+      cluster_minikube
+      ;;
+    k3d|k3s)
+      cluster_k3d
+      ;;
+    microk8s)
+      cluster_microk8s
+      ;;
+    k0s)
+      cluster_k0s
+      ;;
+    *)
+      die "Unknown cluster provider '${choice}'. Must be: kind, docker-desktop, minikube, k3d, microk8s, or k0s."
+      ;;
+  esac
+
+  log "Verifying cluster connectivity..."
   kubectl get nodes -o wide
   kubectl get pods -A
 
-  log "Cluster ready."
+  log "Cluster ready under context '${LAB_CONTEXT}'."
   cat <<EOF
 
   context       : ${LAB_CONTEXT}  (switch: kubectl config use-context ${LAB_CONTEXT})
-  nodes         : kind-control-plane, kind-worker, kind-worker2  (course Lab K101 shape)
-  api server    : published on 0.0.0.0 -> reachable from Windows-side clients
-  ingress http  : localhost:80    (mapped from kind-worker container port 80)
+  api server    : reachable from host / WSL
+  ingress http  : localhost:80
   ingress https : localhost:443
-  nodeports     : 30000-30800, 32000, 32100 on kind-control-plane
-  events/wf ui  : host port 8001 -> kind-worker container port 8080 (course mapping)
-
-  Load an image without a registry (kind's equivalent of k3d image import):
-    docker build -t myapp:0.1.0 .
-    kind load docker-image myapp:0.1.0 --name ${CLUSTER_NAME}
-  ...then use imagePullPolicy: IfNotPresent so the node does not try to pull it.
-
-  Course extras you may want:
-    git clone https://github.com/initcron/k8s-code.git
-    git clone https://github.com/schoolofdevops/kube-ops-view
-    kubectl apply -f kube-ops-view/deploy/     # visualiser on NodePort 32000
+  nodeports     : 30000-30800, 32000 on cluster nodes
 EOF
 }
 
@@ -624,7 +750,7 @@ down() {
 case "${1:-preflight}" in
   preflight)    preflight ;;
   tools)        preflight; tools ;;
-  cluster)      preflight; tools; cluster ;;
+  cluster)      shift; cluster "$@" ;;
   argo)         argo ;;
   ingress)      shift; ingress "$@" ;;
   imageupdater) imageupdater ;;
@@ -633,5 +759,5 @@ case "${1:-preflight}" in
   # and imageupdater after argo (it patches Argo CD Applications).
   all)          preflight; tools; cluster; argo; ingress; prometheus; imageupdater ;;
   down)         down ;;
-  *) die "Usage: $0 {preflight|tools|cluster|argo|ingress [nginx|haproxy|metallb]|prometheus|imageupdater|all|down}" ;;
+  *) die "Usage: $0 {preflight|tools|cluster [kind|docker-desktop|minikube|k3d|microk8s|k0s]|argo|ingress [nginx|haproxy|metallb]|prometheus|imageupdater|all|down}" ;;
 esac

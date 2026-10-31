@@ -63,6 +63,7 @@ $newLines = @()
 $inWsl2Section = $false
 $memoryUpdated = $false
 $processorsUpdated = $false
+$networkingModeUpdated = $false
 
 foreach ($line in $configLines) {
     $trimmed = $line.Trim()
@@ -84,6 +85,10 @@ foreach ($line in $configLines) {
             $newLines += "processors=$targetCPUs"
             $processorsUpdated = $true
         }
+        if (-not $networkingModeUpdated) {
+            $newLines += "networkingMode=mirrored"
+            $networkingModeUpdated = $true
+        }
         $inWsl2Section = $false
         $newLines += $line
         continue
@@ -98,6 +103,11 @@ foreach ($line in $configLines) {
         if ($trimmed -match '^processors\s*=') {
             $newLines += "processors=$targetCPUs"
             $processorsUpdated = $true
+            continue
+        }
+        if ($trimmed -match '^networkingMode\s*=') {
+            $newLines += "networkingMode=mirrored"
+            $networkingModeUpdated = $true
             continue
         }
     }
@@ -118,6 +128,9 @@ if (-not $hasWsl2Section) {
     }
     if (-not $processorsUpdated) {
         $newLines += "processors=$targetCPUs"
+    }
+    if (-not $networkingModeUpdated) {
+        $newLines += "networkingMode=mirrored"
     }
 }
 
