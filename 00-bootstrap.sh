@@ -287,20 +287,20 @@ argo() {
 
   log "Installing Argo Workflows..."
   kubectl create namespace argo --dry-run=client -o yaml | kubectl apply -f -
-  kubectl apply -n argo -f \
+  kubectl apply -n argo --server-side --force-conflicts -f \
     https://raw.githubusercontent.com/argoproj/argo-workflows/stable/manifests/quick-start-minimal.yaml
   kubectl -n argo rollout status deploy/workflow-controller --timeout=300s
 
   log "Installing Argo Events..."
   kubectl create namespace argo-events --dry-run=client -o yaml | kubectl apply -f -
-  kubectl apply -n argo-events -f \
+  kubectl apply -n argo-events --server-side --force-conflicts -f \
     https://raw.githubusercontent.com/argoproj/argo-events/stable/manifests/install.yaml
-  kubectl apply -n argo-events -f \
+  kubectl apply -n argo-events --server-side --force-conflicts -f \
     https://raw.githubusercontent.com/argoproj/argo-events/stable/manifests/install-validating-webhook.yaml
 
   log "Installing Argo Rollouts..."
   kubectl create namespace argo-rollouts --dry-run=client -o yaml | kubectl apply -f -
-  kubectl apply -n argo-rollouts -f \
+  kubectl apply -n argo-rollouts --server-side --force-conflicts -f \
     https://raw.githubusercontent.com/argoproj/argo-rollouts/stable/manifests/install.yaml
   kubectl -n argo-rollouts rollout status deploy/argo-rollouts --timeout=300s
 
