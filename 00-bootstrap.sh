@@ -232,7 +232,7 @@ tools() {
 # --------------------------------------------------------------------------
 # Cluster Providers: KIND, Docker Desktop K8s, Minikube, K3d/K3s, MicroK8s, k0s
 # --------------------------------------------------------------------------
-CLUSTER_PROVIDER="${CLUSTER_PROVIDER:-kind}"
+CLUSTER_PROVIDER="${CLUSTER_PROVIDER:-}"
 
 cluster_kind() {
   have kind || die "kind not found -- run './00-bootstrap.sh tools' first."
