@@ -244,6 +244,22 @@ cluster_kind() {
   else
     log "Creating cluster from ${CLUSTER_CONFIG} ..."
     kind create cluster --name "${CLUSTER_NAME}" --config "$CLUSTER_CONFIG" --wait 5m
+
+    # Automated Docker container rename for worker nodes to A and B
+    local docker_bin=""
+    if have docker; then docker_bin="docker"
+    elif [[ -x "$DOCKER_DESKTOP" ]]; then docker_bin="$DOCKER_DESKTOP"; fi
+
+    if [[ -n "$docker_bin" ]]; then
+      log "Renaming worker containers in Docker to suffix A and B..."
+      if "$docker_bin" ps -a --format '{{.Names}}' | grep -qx "${CLUSTER_NAME}-worker"; then
+        "$docker_bin" rename "${CLUSTER_NAME}-worker" "${CLUSTER_NAME}-worker-a" 2>/dev/null || true
+      fi
+      if "$docker_bin" ps -a --format '{{.Names}}' | grep -qx "${CLUSTER_NAME}-worker2"; then
+        "$docker_bin" rename "${CLUSTER_NAME}-worker2" "${CLUSTER_NAME}-worker-b" 2>/dev/null || true
+      fi
+      log "Docker containers successfully renamed: ${CLUSTER_NAME}-worker-a, ${CLUSTER_NAME}-worker-b."
+    fi
   fi
   LAB_CONTEXT="kind-${CLUSTER_NAME}"
   kubectl config use-context "$LAB_CONTEXT"
@@ -746,6 +762,20 @@ EOF
 }
 
 down() {
+  local docker_bin=""
+  if have docker; then docker_bin="docker"
+  elif [[ -x "$DOCKER_DESKTOP" ]]; then docker_bin="$DOCKER_DESKTOP"; fi
+
+  # Restore original container names if renamed so kind delete cluster never leaves orphans
+  if [[ -n "$docker_bin" ]]; then
+    if "$docker_bin" ps -a --format '{{.Names}}' | grep -qx "${CLUSTER_NAME}-worker-a"; then
+      "$docker_bin" rename "${CLUSTER_NAME}-worker-a" "${CLUSTER_NAME}-worker" 2>/dev/null || true
+    fi
+    if "$docker_bin" ps -a --format '{{.Names}}' | grep -qx "${CLUSTER_NAME}-worker-b"; then
+      "$docker_bin" rename "${CLUSTER_NAME}-worker-b" "${CLUSTER_NAME}-worker2" 2>/dev/null || true
+    fi
+  fi
+
   have kind || die "kind not found."
   log "Deleting kind cluster '${CLUSTER_NAME}'..."
   kind delete cluster --name "${CLUSTER_NAME}" || true
