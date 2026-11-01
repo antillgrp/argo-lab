@@ -122,11 +122,11 @@ If you prefer to run each step individually as you progress through course chapt
 * **When to run:** Before starting Section 3.
 * **What it does:** Downloads and installs official binaries for `kind`, `argocd`, `argo`, `argo-events`, `argo-rollouts`, the `kubectl-argo-rollouts` plugin, and **`k9s`** (Kubernetes terminal UI) into `~/.local/bin/`.
 
-### 2. Provision Kubernetes Cluster (KIND, Docker Desktop, Minikube, K3d, MicroK8s, k0s)
+### 2. Provision Kubernetes Cluster (KIND, Docker Desktop, Minikube, K3d/K3s, MicroK8s, k0s)
 ```bash
 ./00-bootstrap.sh cluster                 # Interactive selection prompt
 # Or specify directly:
-./00-bootstrap.sh cluster kind            # Default: 3-node KIND cluster (Lab K101)
+./00-bootstrap.sh cluster kind            # Default: 3-node KIND cluster (Course Lab K101)
 ./00-bootstrap.sh cluster docker-desktop  # Docker Desktop Kubernetes on Windows Host
 ./00-bootstrap.sh cluster minikube        # Multi-node Minikube (Docker driver)
 ./00-bootstrap.sh cluster k3d             # 3-node K3s in Docker (Traefik disabled)
@@ -134,12 +134,17 @@ If you prefer to run each step individually as you progress through course chapt
 ./00-bootstrap.sh cluster k0s             # Mirantis k0s in Docker
 ```
 * **When to run:** Section 3 (Environment Setup, Lab K101).
-* **Options:**
-  * **`kind` (Default & Recommended):** Spins up a 3-node cluster matching course Lab K101 (`kind-control-plane`, `kind-worker`, `kind-worker2`) using [`kind-argo.yaml`](file:///home/toor/DEVOPS_DEV/_Ultimate_Argo_Bootcamp/kind-argo.yaml).
-  * **`docker-desktop`:** Uses the built-in Kubernetes cluster in Docker Desktop on your Windows host (`context: docker-desktop`).
-  * **`minikube`:** Multi-node cluster with ports `80`, `443`, and NodePorts mapped.
-  * **`k3d` / `k3s`:** Lightweight multi-node cluster in Docker with Traefik disabled so it never conflicts with Ingress NGINX.
-  * **`microk8s` / `k0s`:** Standalone zero-friction options.
+
+#### Detailed Guide to Supported Kubernetes Runtimes:
+
+| Runtime | Deployment Model | How to Use & Prerequisites | Course Lab Compatibility |
+| :--- | :--- | :--- | :--- |
+| **`kind`** *(Default)* | Containers in Docker | Run `./00-bootstrap.sh cluster kind`. Automatically starts a 3-node cluster (`kind-control-plane`, `kind-worker`, `kind-worker2`) using [`kind-argo.yaml`](file:///home/toor/DEVOPS_DEV/_Ultimate_Argo_Bootcamp/kind-argo.yaml) with host port forwards on `80`, `443`, NodePorts `30000–30800`, `32000`, and `0.0.0.0` API binding. | **100% Verbatim** — Exactly matches all course exercises, NodePort ranges, and multi-node workload distribution. |
+| **`docker-desktop`** | Windows Host VM / WSL2 | 1. Open **Docker Desktop** on Windows.<br>2. Go to **Settings (gear icon) → Kubernetes**.<br>3. Check **Enable Kubernetes** and click **Apply & restart** (or click **Create cluster**).<br>4. Run `./00-bootstrap.sh cluster docker-desktop` to bind `kubectl` to `context: docker-desktop`. | **High** — Single-node; services and NodePorts are mapped directly to Windows `localhost`. Argo Workflows, CD, and Rollouts work seamlessly. |
+| **`minikube`** | Multi-node in Docker | Run `./00-bootstrap.sh cluster minikube`. Script auto-downloads `minikube` binary into `~/.local/bin/` if missing and initializes a 3-node cluster using the `--driver=docker` runtime with ports forwarded. | **High** — Supports multi-node topology. Can load local images via `minikube image load <img:tag>`. |
+| **`k3d` / `k3s`** | Lightweight K3s in Docker | Run `./00-bootstrap.sh cluster k3d`. Automatically downloads `k3d` CLI, deploys a 3-node lightweight cluster (1 control plane, 2 worker agents), and **disables default Traefik** (`--k3s-arg "--disable=traefik@server:0"`) to avoid port conflicts with NGINX Ingress. | **Very High** — Fast boot times, low RAM usage, clean support for Ingress NGINX and Argo Rollouts canary traffic routing. |
+| **`microk8s`** | Snap / Host Systemd | Run `./00-bootstrap.sh cluster microk8s`. If MicroK8s is installed on your Linux host or VM, the script enables `dns` and `ingress` addons and points `kubectl` to the `microk8s` context. | **Medium** — Requires Snap/systemd on host (not supported inside bare WSL2 without systemd enabled). |
+| **`k0s`** | Mirantis single/multi-node | Run `./00-bootstrap.sh cluster k0s`. Downloads `k0s` and launches a lightweight control plane inside Docker container `k0s-argo-lab` with ports `80`, `443`, and `6443` bound to localhost. | **Medium** — Ideal for standalone lightweight testing. |
 
 ### 3. Install Core Argo Stack
 ```bash
