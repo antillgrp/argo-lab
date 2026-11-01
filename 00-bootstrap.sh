@@ -111,11 +111,17 @@ docker_cleanup_prompt() {
   printf '\033[1;36m[argo-lab] Do you want to clean up Docker before continuing? [y/N]: \033[0m'
   read -r clean_ans
   if [[ "$clean_ans" =~ ^[Yy]$ ]]; then
-    # 1. Clean ALL (Full system prune: containers, networks, images, build cache)
-    printf '\033[1;33m[argo-lab]   -> Clean EVERYTHING in Docker (containers, networks, images, volumes)? [y/N]: \033[0m'
+    # 1. Clean ALL (Full wipe: stop & rm all containers first, then prune system & images)
+    printf '\033[1;33m[argo-lab]   -> Clean EVERYTHING in Docker (stop/remove all containers, networks, images, volumes)? [y/N]: \033[0m'
     read -r clean_all
     if [[ "$clean_all" =~ ^[Yy]$ ]]; then
-      log "  Pruning entire Docker system (containers, networks, volumes, all images)..."
+      local all_c
+      all_c="$("$docker_cmd" ps -aq 2>/dev/null || true)"
+      if [[ -n "$all_c" ]]; then
+        log "  Stopping and removing all running/stopped Docker containers..."
+        "$docker_cmd" rm -f $all_c >/dev/null 2>&1 || true
+      fi
+      log "  Pruning entire Docker system (networks, volumes, build cache, all images)..."
       "$docker_cmd" system prune -a --volumes -f || true
       log "  Docker system completely wiped clean."
       return 0
