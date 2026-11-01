@@ -35,13 +35,12 @@ This repository gives you a pre-configured local Kubernetes environment running 
 
 ---
 
-## 🚀 Quick Start (Up & Running in 4 Steps)
+## 🚀 Quick Start (Up & Running in 3 Steps)
 
 ```mermaid
 flowchart LR
     A["1. Start Docker<br>(Windows)"] --> B["2. Allocate Specs<br>(50% RAM/CPU)"]
     B --> C["3. Run Preflight<br>(Audit & Cleanup)"]
-    C --> D["4. Bootstrap All<br>(Cluster & Argo Stack)"]
 ```
 
 ### Step 1: Start Docker Desktop
@@ -62,8 +61,13 @@ Run [`set-wsl-resources.bat`](file:///_scripts/set-wsl-resources.bat) from Windo
 ```
 > **What it does:** Verifies Docker reachability, inspects WSL mirrored networking, and offers an **interactive menu** to wipe old or running containers (`y` to Clean ALL).
 
-### Step 4: Stand Up Cluster & Argo Stack
-Run the end-to-end installer:
+---
+
+## 🛠️ Step-by-Step Bootstrap Commands
+
+You can stand up the entire environment in one command, or execute each component step-by-step as you progress through course modules:
+
+### Option A: Install Everything in One Shot
 ```bash
 ./00-bootstrap.sh all
 ```
@@ -73,16 +77,12 @@ Run the end-to-end installer:
 >
 > In ~5–7 minutes, your cluster, Argo CD, Rollouts, Workflows, Events, Prometheus, Grafana, and Image Updater are ready!
 
----
+### Option B: Run Step-by-Step as You Progress
 
-## 🧭 Step-by-Step CLI Commands Reference
-
-If you prefer to run each step individually as you progress through course modules:
-
-| Command | Purpose | When to Run |
+| Command | Purpose | When to Run in Course |
 | :--- | :--- | :--- |
 | **`./00-bootstrap.sh tools`** | Installs `kind`, `argocd`, `argo`, `argo-events`, `kubectl-argo-rollouts`, and **`k9s`** | Before Section 3 |
-| **`./00-bootstrap.sh cluster`** | Interactive prompt to select your cluster provider | Section 3 (Lab K101) |
+| **`./00-bootstrap.sh cluster`** | Interactive prompt: KIND, Docker Desktop, Minikube, K3d, MicroK8s, k0s | Section 3 (Lab K101) |
 | **`./00-bootstrap.sh argo`** | Installs Argo CD, Rollouts, Workflows, and Events | Before Section 4 |
 | **`./00-bootstrap.sh ingress`** | Interactive prompt: NGINX Ingress, HAProxy, or MetalLB | Before Section 5 (Lab K603) |
 | **`./00-bootstrap.sh prometheus`** | Deploys Prometheus & Grafana (`prom` release) | Before Section 9 (Lab K609) |
