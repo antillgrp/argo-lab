@@ -6,6 +6,35 @@ This repository gives you a pre-configured local Kubernetes environment running 
 
 ---
 
+## 📁 Repository Directory Structure
+
+```text
+├── 00-bootstrap.sh                   # Main idempotent lab installer script
+├── _scripts/                         # Utility scripts for Windows & WSL host setup
+│   ├── set-wsl-resources.bat         # Batch launcher (bypasses execution policy & unblocks file)
+│   └── set-wsl-resources.ps1         # PowerShell host hardware allocation script
+├── kind-argo.yaml                    # 3-node kind cluster configuration (mirrored mode compatible)
+├── k8s-code/                         # Official School of DevOps course manifests (instavote, storage, etc.)
+├── kube-ops-view/                    # Cluster visualizer dashboard (deploy on NodePort 32000)
+├── README.md                         # This training handbook
+├── demo-app/                         # Sample progressive delivery microservice
+│   ├── 10-app.yaml                   # Rollout spec, stable & preview services, ingress
+│   ├── 40-analysis.yaml              # Prometheus metric queries for automated rollback
+│   └── kustomization.yaml            # Kustomize manifest for GitOps tracking
+├── gitops/                           # Argo CD declarative applications
+│   ├── 10-application.yaml           # Root Argo CD Application
+│   ├── 20-imageupdater-annotations.yaml # Lab K608 annotation patch
+│   └── ALT-imageupdater-v1-crd.yaml  # Reference v1.x CRD syntax
+└── RESOURCES/                        # Official course lab assets
+    ├── *.pdf                         # Step-by-step PDF lab instructions (Lab 1 through 8)
+    ├── *.url                         # Direct browser shortcuts to School of DevOps tutorials
+    ├── LECTURE_NOTES/                # Saved markdown notes from text-only course lectures
+    └── _VIDEOS/                      # Downloaded video lectures (sorted and numbered 01-69)
+        └── VIDEO_INDEX.md            # Detailed chronological video mapping table
+```
+
+---
+
 ## 🎯 Quick Start (Get Up and Running in 4 Steps)
 
 ### Step 1: Start Docker Desktop
@@ -208,32 +237,3 @@ Your WSL2 environment uses `networkingMode=mirrored`.
 * Course **Lab K608** teaches configuring Image Updater with **annotations** on the Application.
 * Modern Image Updater `v1.x` removed annotation support and replaced it with an `ImageUpdater` CRD (annotations are silently ignored).
 * This environment installs **`v0.18.0`** so course manifests work verbatim out-of-the-box.
-
----
-
-## 📁 Repository Directory Structure
-
-```text
-├── 00-bootstrap.sh                   # Main idempotent lab installer script
-├── _scripts/                         # Utility scripts for Windows & WSL host setup
-│   ├── set-wsl-resources.bat         # Batch launcher (bypasses execution policy & unblocks file)
-│   └── set-wsl-resources.ps1         # PowerShell host hardware allocation script
-├── kind-argo.yaml                    # 3-node kind cluster configuration (mirrored mode compatible)
-├── k8s-code/                         # Official School of DevOps course manifests (instavote, storage, etc.)
-├── kube-ops-view/                    # Cluster visualizer dashboard (deploy on NodePort 32000)
-├── README.md                         # This training handbook
-├── demo-app/                         # Sample progressive delivery microservice
-│   ├── 10-app.yaml                   # Rollout spec, stable & preview services, ingress
-│   ├── 40-analysis.yaml              # Prometheus metric queries for automated rollback
-│   └── kustomization.yaml            # Kustomize manifest for GitOps tracking
-├── gitops/                           # Argo CD declarative applications
-│   ├── 10-application.yaml           # Root Argo CD Application
-│   ├── 20-imageupdater-annotations.yaml # Lab K608 annotation patch
-│   └── ALT-imageupdater-v1-crd.yaml  # Reference v1.x CRD syntax
-└── RESOURCES/                        # Official course lab assets
-    ├── *.pdf                         # Step-by-step PDF lab instructions (Lab 1 through 8)
-    ├── *.url                         # Direct browser shortcuts to School of DevOps tutorials
-    ├── LECTURE_NOTES/                # Saved markdown notes from text-only course lectures
-    └── _VIDEOS/                      # Downloaded video lectures (sorted and numbered 01-69)
-        └── VIDEO_INDEX.md            # Detailed chronological video mapping table
-```

@@ -127,6 +127,13 @@ nodes:
         protocol: tcp
 
   - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          name: "kind-worker-a"
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-a,worker-id=a"
     extraPortMappings:
       # nginx-ingress reaches the host through these (Lab K603/K609).
       - containerPort: 80
@@ -150,3 +157,10 @@ nodes:
         protocol: tcp
 
   - role: worker
+    kubeadmConfigPatches:
+      - |
+        kind: JoinConfiguration
+        nodeRegistration:
+          name: "kind-worker-b"
+          kubeletExtraArgs:
+            node-labels: "topology.kubernetes.io/zone=zone-b,worker-id=b"
